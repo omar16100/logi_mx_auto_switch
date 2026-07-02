@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.logi_mx_switch</string>
+    <!-- installed as a root LaunchDaemon (/Library/LaunchDaemons): on this
+         macOS the kernel (IOHIDFamily) requires a privileged client to open
+         BLE HID devices with keyboard usages, even after tccd allows
+         Input Monitoring (verified in unified log 02/07/2026) -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/USERNAME/.local/share/uv/python/cpython-3.12.11-macos-aarch64-none/bin/python3.12</string>
+        <string>/Users/USERNAME/projects/logi_mx_auto_switch/logi_mx_switch.py</string>
+        <string>watch</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/Users/USERNAME/projects/logi_mx_auto_switch/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/USERNAME/projects/logi_mx_auto_switch/logs/launchd.err.log</string>
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

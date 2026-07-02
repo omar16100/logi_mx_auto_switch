@@ -1,0 +1,7 @@
+{
+  "keyboard_vidpid": "046D:B35B",
+  "mouse_vidpid": "046D:B023",
+  "target_host": 1,
+  "poll_interval_s": 1.0,
+  "absent_polls_required": 2
+}
