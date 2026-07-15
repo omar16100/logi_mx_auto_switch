@@ -53,8 +53,9 @@ tail -f logs/logi_mx_switch.log
 
 ## Behavioral notes
 
-- BLE devices blip off HID enumeration when idle and re-register (registry IDs change). This is why `absent_polls_required` exists; a single absent poll never fires.
-- "time jump detected" in the log is the sleep/wake guard resyncing state without firing. It also triggers after a push blocks the poll loop for a few seconds; both cases are benign by design.
+- BLE devices blip off HID enumeration when idle and re-register (registry IDs change). This is why `absent_polls_required` exists; a single absent poll never fires. For the same reason `push_mouse` treats `--list` as a hint only and always attempts the active HID++ path, retrying with backoff within `send_budget_s` rather than giving up when the idle mouse is momentarily unlisted. ("mouse not listed in enumeration ... attempting active probe anyway" and "mouse enumeration unknown (transport timeout) ..." are the two distinct diagnostic paths for `--list` returning absent vs. timing out.)
+- "time jump detected" in the log is the sleep/wake guard resyncing state without firing. The watcher polls on the wall clock (`time.time`), not `time.monotonic`, because macOS pauses the monotonic clock across sleep so only the wall clock reveals the gap. It also triggers after a push blocks the poll loop for a few seconds; both cases are benign by design.
+- "wall-clock jumped Ns ... the Mac slept mid-push, aborting" means a push was in flight when the machine slept (the mouse is unreachable while asleep). The push aborts rather than exhausting attempts across the sleep; the next real Easy-Switch pushes normally.
 - setCurrentHost success = the mouse VANISHES from enumeration (the BLE link drops). "mouse still present after setCurrentHost" means it was already on that host or the send was lost; the watcher retries.
 - After running commands via sudo, log files under logs/ may become root-owned; `sudo chown -R <user> logs/` restores interactive use.
 

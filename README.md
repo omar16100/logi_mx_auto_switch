@@ -74,9 +74,16 @@ logs/                        runtime logs (rotating)
 | `target_host` | none (required) | 0-based Easy-Switch slot to push the mouse to |
 | `poll_interval_s` | 1.0 | keyboard presence poll period |
 | `absent_polls_required` | 2 | consecutive absent polls before firing (debounce) |
-| `send_retries` | 8 | push attempts while the mouse is asleep/absent |
-| `send_retry_delay_s` | 1.0 | delay between push attempts |
+| `send_budget_s` | 35.0 | wall-clock budget for push attempts (backoff); no new attempt starts past it |
+| `sleep_abort_s` | 30.0 | if a push step overruns its expected time by this much, the Mac slept: abort |
+| `send_retry_delay_s` | 1.0 | departure-confirmation poll delay after setCurrentHost |
 | `keyboard_vidpid` / `mouse_vidpid` | `046D:B35B` / `046D:B023` | change for other MX models |
+
+The push always attempts the active HID++ path even when the mouse is missing from `--list`
+(an idle MX Master drops off enumeration), retrying with backoff until it succeeds or the
+`send_budget_s` budget is spent. If the Mac sleeps mid-push a step overruns by more than
+`sleep_abort_s` and the push aborts instead of grinding across the sleep. (`send_retries` is
+kept only so older `config.json` files stay valid; it no longer bounds the loop.)
 
 Transport keys (`hidpp_usage_page` 0xFF43, `hidpp_usage` 0x0202, `hidapitester_path`) also live in `default_config` and rarely need changing.
 

@@ -21,6 +21,7 @@ import argparse
 import json
 import logging
 import logging.handlers
+import math
 import re
 import subprocess
 import sys
@@ -46,10 +47,23 @@ default_config = {
     "target_host": None,  # 0-based Easy-Switch channel of the OTHER computer
     "poll_interval_s": 1.0,
     "absent_polls_required": 2,  # debounce: BLE devices blip off/on when idle
-    "send_retries": 8,
+    # push_mouse retries within a wall-clock budget with backoff (see
+    # send_backoff_schedule) rather than a fixed count, because an idle MX
+    # Master can be off HID enumeration for several seconds after a switch.
+    "send_budget_s": 35.0,
+    # if a push step overruns its expected time by this much, the Mac slept
+    # mid-push: abort instead of grinding attempts across the sleep.
+    "sleep_abort_s": 30.0,
+    # delay between the departure-confirmation polls after setCurrentHost.
     "send_retry_delay_s": 1.0,
+    # deprecated: superseded by send_budget_s; kept so old config.json stays valid.
+    "send_retries": 8,
     "hidapitester_path": str(project_dir / "bin" / "hidapitester"),
 }
+
+# backoff delays (seconds) between push attempts; the last value repeats until
+# the send_budget_s wall-clock budget is spent
+send_backoff_schedule = [0.5, 1.0, 1.0, 2.0, 2.0, 3.0, 5.0, 5.0, 8.0]
 
 log = logging.getLogger("logi_mx_switch")
 
@@ -430,50 +444,129 @@ def cmd_discover(transport: hid_transport, config: dict) -> int:
     return 0
 
 
-def push_mouse(transport: hid_transport, config: dict, target_host: int) -> bool:
-    """Full push sequence with retries: wait for mouse to be reachable,
-    discover indexes, send setCurrentHost."""
+def _finite_positive(value, fallback: float) -> float:
+    """Coerce a config number to a finite, positive float, else `fallback`.
+    Guards push_mouse against a NaN/inf/negative budget that would loop forever
+    (Python's json module accepts NaN/Infinity literals by default)."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return v if math.isfinite(v) and v > 0 else fallback
+
+
+def push_mouse(transport: hid_transport, config: dict, target_host: int, *,
+               now_fn=time.time, sleep_fn=time.sleep) -> bool:
+    """Full push sequence: attempt the active HID++ path (discover indexes,
+    send setCurrentHost) with backoff until it succeeds or the send_budget_s
+    budget is spent (no new attempt starts once the budget expires).
+
+    Enumeration presence (`is_present`) is used only as a diagnostic hint, never
+    as a gate: an idle MX Master drops off HID enumeration, so a passive `--list`
+    miss must not stop us from trying the only path that can actually reach it.
+
+    Sleep-safe: each blocking segment is bracketed by `slept()` — enumeration
+    plus discovery before a send, the send itself, each departure-confirmation
+    poll together with its is_present read, and each backoff sleep. If the wall
+    clock jumps more than sleep_abort_s past that segment's expected duration the
+    Mac slept mid-push, so we abort rather than send to (or trust the state of) a
+    stale/unreachable device. now_fn/sleep_fn are injectable for tests; now_fn
+    must be wall-clock (time.time) so a suspend shows as a jump (time.monotonic
+    pauses across macOS sleep)."""
     vidpid = config["mouse_vidpid"]
-    for attempt in range(config["send_retries"]):
-        if transport.is_present(vidpid) is not True:
-            log.warning("mouse absent or unknown in enumeration "
-                        "(attempt %d/%d)", attempt + 1, config["send_retries"])
-            time.sleep(config["send_retry_delay_s"])
-            continue
+    budget_s = _finite_positive(config.get("send_budget_s"), 35.0)
+    abort_s = _finite_positive(config.get("sleep_abort_s"), 30.0)
+    confirm_delay = _finite_positive(config.get("send_retry_delay_s"), 1.0)
+    deadline = now_fn() + budget_s
+    attempt = 0
+
+    def slept(since: float, expected: float) -> bool:
+        """True when the wall clock advanced far past `expected` since `since` —
+        the Mac slept mid-push; aborting beats acting on an unreachable/stale
+        device or a trigger that was really a sleep, not an Easy-Switch."""
+        gap = now_fn() - since
+        if gap > expected + abort_s:
+            log.warning("wall-clock jumped %.0fs (expected ~%.1fs): the Mac "
+                        "slept mid-push, aborting (mouse unreachable while "
+                        "asleep, or not a real Easy-Switch)", gap, expected)
+            return True
+        return False
+
+    while True:
+        # Authoritative budget guard at the loop head: never START a new attempt
+        # once the budget is spent (the first attempt always runs).
+        if attempt > 0 and now_fn() >= deadline:
+            break
+        attempt += 1
+        work_start = now_fn()
+
+        # Diagnostic only: report enumeration state but always active-probe.
+        presence = transport.is_present(vidpid)
+        if presence is None:
+            log.warning("mouse enumeration unknown (transport timeout), "
+                        "attempting active probe anyway (attempt %d)", attempt)
+        elif presence is False:
+            log.info("mouse not listed in enumeration (idle/asleep), "
+                     "attempting active probe anyway (attempt %d)", attempt)
+
         device_index, feature_index = discover_device_index(transport, vidpid)
         if device_index == "denied":
             log.error("aborting: cannot send without Input Monitoring "
                       "permission")
             return False
-        if device_index is None:
-            time.sleep(config["send_retry_delay_s"])
-            continue
-        nb_hosts, current_host = get_host_info(transport, vidpid, device_index,
-                                               feature_index)
-        if current_host == target_host:
-            log.info("mouse already on host channel %d, nothing to do",
-                     target_host)
-            return True
-        if nb_hosts is not None and target_host >= nb_hosts:
-            log.error("target_host %d is out of range: mouse reports only "
-                      "%d paired hosts", target_host, nb_hosts)
+        if device_index is not None:
+            nb_hosts, current_host = get_host_info(transport, vidpid,
+                                                   device_index, feature_index)
+            if current_host == target_host:
+                log.info("mouse already on host channel %d, nothing to do",
+                         target_host)
+                return True
+            if nb_hosts is not None and target_host >= nb_hosts:
+                log.error("target_host %d is out of range: mouse reports only "
+                          "%d paired hosts", target_host, nb_hosts)
+                return False
+            # Do not send after a (minutes-long) sleep during enumeration or
+            # discovery: the trigger may be stale and the mouse may already have
+            # moved. Expected 30s comfortably clears a slow-but-real discovery.
+            if slept(work_start, 30.0):
+                return False
+            send_start = now_fn()
+            sent = set_current_host(transport, vidpid, device_index,
+                                    feature_index, target_host)
+            if slept(send_start, 1.0):
+                return False  # slept during the send: don't trust the outcome
+            if sent:
+                # success means the mouse leaves this Mac: verify by enumeration
+                # (None = unknown must not count as a confirmed departure). The
+                # guard brackets the poll AND the is_present read, so a sleep in
+                # either cannot be mistaken for a confirmed departure.
+                for _ in range(3):
+                    poll_start = now_fn()
+                    sleep_fn(confirm_delay)
+                    gone = transport.is_present(vidpid) is False
+                    if slept(poll_start, confirm_delay):
+                        return False
+                    if gone:
+                        log.info("mouse pushed to host channel %d (confirmed "
+                                 "gone from this Mac)", target_host)
+                        return True
+                log.warning("mouse still present after setCurrentHost(%d), "
+                            "retrying (already on that host, or send lost)",
+                            target_host)
+
+        now = now_fn()
+        if now >= deadline:
+            break  # avoid a pointless final backoff sleep
+        delay = send_backoff_schedule[min(attempt - 1,
+                                          len(send_backoff_schedule) - 1)]
+        delay = min(delay, max(0.0, deadline - now))  # never overshoot budget
+        before = now_fn()
+        sleep_fn(delay)
+        if slept(before, delay):
             return False
-        if set_current_host(transport, vidpid, device_index, feature_index,
-                            target_host):
-            # success means the mouse leaves this Mac: verify by enumeration
-            # (None = unknown must not count as a confirmed departure)
-            for _ in range(3):
-                time.sleep(1.0)
-                if transport.is_present(vidpid) is False:
-                    log.info("mouse pushed to host channel %d (confirmed "
-                             "gone from this Mac)", target_host)
-                    return True
-            log.warning("mouse still present after setCurrentHost(%d), "
-                        "retrying (already on that host, or send lost)",
-                        target_host)
-        time.sleep(config["send_retry_delay_s"])
-    log.error("giving up pushing the mouse after %d attempts",
-              config["send_retries"])
+
+    log.error("giving up pushing the mouse after %d attempts within %.0fs "
+              "budget", attempt, budget_s)
     return False
 
 
@@ -505,7 +598,10 @@ def cmd_watch(transport: hid_transport, config: dict) -> int:
         if present is None:
             # transport failure: unknown state must never count as absent
             log.warning("keyboard presence unknown this poll, skipping")
-        elif watcher.feed(present, time.monotonic()):
+        # wall clock (time.time), not monotonic: macOS pauses monotonic across
+        # sleep, so only wall clock shows the jump the watcher uses to tell a
+        # sleep/wake apart from a real Easy-Switch and resync without firing.
+        elif watcher.feed(present, time.time()):
             log.info("keyboard left this Mac, pushing mouse to host %d",
                      target_host)
             push_mouse(transport, config, target_host)
