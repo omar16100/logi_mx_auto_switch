@@ -491,3 +491,143 @@ class test_push_mouse:
                             now_fn=c.now, sleep_fn=c.sleep)
             assert ok is False, f"budget={bad!r}"
             assert 30.0 <= c.now() <= 40.0, f"budget={bad!r} spent {c.now()}"
+
+    def test_fast_path_uses_cache_and_skips_discovery(self, monkeypatch):
+        # Mouse present at trigger + cached indices -> skip discovery, send
+        # straight from the cache, confirm the present->absent departure.
+        def boom(*a):
+            raise AssertionError("discovery must be skipped on the fast path")
+        monkeypatch.setattr(m, "discover_device_index", boom)
+        monkeypatch.setattr(m, "get_host_info", boom)
+        sent = {}
+        def fake_set(transport, vidpid, di, fi, target):
+            sent["idx"] = (di, fi); sent["target"] = target
+            return True
+        monkeypatch.setattr(m, "set_current_host", fake_set)
+        c = clock()
+        t = fake_transport([True, False])  # present at trigger, gone after send
+        t.cached_change_host = (0xFF, 0x0A)
+        ok = push_mouse(t, _config(), 0, now_fn=c.now, sleep_fn=c.sleep)
+        assert ok is True
+        assert sent == {"idx": (0xFF, 0x0A), "target": 0}
+
+    def test_slow_path_populates_cache(self, monkeypatch):
+        # A successful full discover must cache the indices for next time.
+        _patch_active_path(monkeypatch)   # discover=(0xFF,0x0A), host=(2,1), set ok
+        c = clock()
+        t = fake_transport(False)
+        assert getattr(t, "cached_change_host", None) is None
+        ok = push_mouse(t, _config(), 0, now_fn=c.now, sleep_fn=c.sleep)
+        assert ok is True
+        assert t.cached_change_host == (0xFF, 0x0A)
+
+    def test_stale_cache_invalidates_and_falls_back(self, monkeypatch):
+        # A cached send that is NOT confirmed gone must invalidate the cache and
+        # fall back to a full rediscovery within the same push.
+        calls = {"discover": 0, "set": 0}
+        def fake_discover(transport, vidpid):
+            calls["discover"] += 1
+            return (0x00, 0x0A)            # rediscovery finds a different index
+        monkeypatch.setattr(m, "discover_device_index", fake_discover)
+        monkeypatch.setattr(m, "get_host_info", lambda *a: (2, 1))
+        def fake_set(*a):
+            calls["set"] += 1
+            return True
+        monkeypatch.setattr(m, "set_current_host", fake_set)
+        c = clock()
+        # is_present: present at both triggers; attempt1 (fast) stays present
+        # through confirmation so it is NOT confirmed and the cache is dropped;
+        # attempt2 (slow) confirms gone (False).
+        t = fake_transport([True, True, True, True, True, False])
+        t.cached_change_host = (0xFF, 0x0A)
+        ok = push_mouse(t, _config(), 0, now_fn=c.now, sleep_fn=c.sleep)
+        assert ok is True
+        assert calls["discover"] == 1          # fell back to discovery
+        assert calls["set"] == 2               # fast send + slow send
+        assert t.cached_change_host == (0x00, 0x0A)  # refreshed from rediscovery
+
+    def test_fast_path_send_error_invalidates_cache(self, monkeypatch):
+        # A cached send that returns False (e.g. stale-index HID++ error) must
+        # invalidate the cache and rediscover within the same push (regression:
+        # invalidation must not sit behind `if sent:`).
+        calls = {"discover": 0, "set": 0}
+        def fake_discover(transport, vidpid):
+            calls["discover"] += 1
+            return (0x00, 0x0A)
+        monkeypatch.setattr(m, "discover_device_index", fake_discover)
+        monkeypatch.setattr(m, "get_host_info", lambda *a: (2, 1))
+        def fake_set(*a):
+            calls["set"] += 1
+            return calls["set"] > 1        # 1st (cached) send fails, 2nd succeeds
+        monkeypatch.setattr(m, "set_current_host", fake_set)
+        c = clock()
+        t = fake_transport([True, True, False])  # present at triggers, then gone
+        t.cached_change_host = (0xFF, 0x0A)
+        ok = push_mouse(t, _config(), 0, now_fn=c.now, sleep_fn=c.sleep)
+        assert ok is True
+        assert calls["set"] == 2
+        assert calls["discover"] == 1              # cache invalidated -> rediscover
+        assert t.cached_change_host == (0x00, 0x0A)
+
+    def test_absent_mouse_does_not_false_confirm_from_cache(self, monkeypatch):
+        # The false-success guard: cache present but mouse ABSENT (asleep) must NOT
+        # blind-send and read the already-absent mouse as a confirmed switch; it
+        # must fall back to real discovery (which fails honestly here).
+        calls = {"discover": 0}
+        def fake_discover(transport, vidpid):
+            calls["discover"] += 1
+            return (None, None)            # asleep: cannot be opened
+        monkeypatch.setattr(m, "discover_device_index", fake_discover)
+        def boom(*a):
+            raise AssertionError("must not blind-send to an absent mouse")
+        monkeypatch.setattr(m, "set_current_host", boom)
+        monkeypatch.setattr(m, "get_host_info", lambda *a: (2, 1))
+        c = clock()
+        t = fake_transport(False)          # absent everywhere (asleep)
+        t.cached_change_host = (0xFF, 0x0A)
+        ok = push_mouse(t, _config(send_budget_s=3.0), 0,
+                        now_fn=c.now, sleep_fn=c.sleep)
+        assert ok is False                 # honest failure, not a false success
+        assert calls["discover"] >= 1      # fell back to real discovery
+
+    def test_fast_path_open_failure_not_confirmed_as_success(self, monkeypatch):
+        # Mouse present in --list but the vendor open FAILS -> set_current_host
+        # returns False (nothing sent). Even if the mouse then drops from
+        # enumeration, the fast path must NOT read that as a confirmed switch; it
+        # invalidates the cache and falls back to discovery (which also fails).
+        monkeypatch.setattr(m, "set_current_host", lambda *a: False)  # open failed
+        calls = {"discover": 0}
+        def fake_discover(transport, vidpid):
+            calls["discover"] += 1
+            return (None, None)
+        monkeypatch.setattr(m, "discover_device_index", fake_discover)
+        monkeypatch.setattr(m, "get_host_info", lambda *a: (2, 1))
+        c = clock()
+        t = fake_transport([True, False, False])  # present at trigger, then gone
+        t.cached_change_host = (0xFF, 0x0A)
+        ok = push_mouse(t, _config(send_budget_s=3.0), 0,
+                        now_fn=c.now, sleep_fn=c.sleep)
+        assert ok is False                        # not falsely confirmed
+        assert calls["discover"] >= 1             # cache dropped -> rediscovery
+        assert t.cached_change_host is None
+
+
+class test_set_current_host_open_status:
+    """setCurrentHost must treat an unopened device (asleep/absent/denied) as NOT
+    sent, so a later 'mouse absent' reading can't be mistaken for a real switch."""
+
+    class _tx:
+        def __init__(self, status):
+            self._status = status
+        def send_and_read(self, vidpid, report, read_timeout_ms=2000, reads=1):
+            return self._status, []   # no reply blocks
+
+    def test_opened_but_no_reply_counts_as_sent(self):
+        # the expected success shape: open ok, link drops, no reply
+        assert m.set_current_host(self._tx("ok"), "046D:B023", 0xFF, 0x0A, 0) is True
+
+    def test_open_failed_is_not_sent(self):
+        assert m.set_current_host(self._tx("failed"), "046D:B023", 0xFF, 0x0A, 0) is False
+
+    def test_denied_is_not_sent(self):
+        assert m.set_current_host(self._tx("denied"), "046D:B023", 0xFF, 0x0A, 0) is False

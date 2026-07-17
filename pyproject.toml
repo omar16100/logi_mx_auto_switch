@@ -1,6 +1,6 @@
 [project]
 name = "logi_mx_auto_switch"
-version = "0.1.0"
+version = "0.2.0"
 description = "macOS port of Logitech-MX-Auto-Switch: auto-switch MX Master mouse when MX Keys keyboard Easy-Switches away"
 requires-python = ">=3.9"
 dependencies = []

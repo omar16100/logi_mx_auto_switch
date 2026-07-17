@@ -263,6 +263,11 @@ class hid_transport:
         self.exe = config["hidapitester_path"]
         self.usage_page = config["hidpp_usage_page"]
         self.usage = config["hidpp_usage"]
+        # last known-good (device_index, feature_index) for the mouse's ChangeHost
+        # feature. Stable per device, so push_mouse caches it here to skip the
+        # ~8s discover/get_host_info round-trips on subsequent switches; a stale
+        # cache self-heals (push_mouse clears it if a cached send isn't confirmed).
+        self.cached_change_host = None
 
     def _run(self, args: list, timeout_s: float = 10.0):
         """Run hidapitester. Returns combined output, or None when the
@@ -341,20 +346,28 @@ def hidpp_call(transport: hid_transport, vidpid: str, device_index: int,
     possible unsolicited events. Only resent (attempts > 1) for idempotent
     calls like IRoot getFeature and getHostInfo."""
     report = build_hidpp_report(device_index, feature_index, function_id, params)
+    opened = False  # did the device's HID interface open on any attempt?
     for attempt in range(attempts):
         status, responses = transport.send_and_read(vidpid, report,
                                                     read_timeout_ms, reads)
         if status == "denied":
-            return {"kind": "denied", "params": [], "error_code": None}
+            return {"kind": "denied", "params": [], "error_code": None,
+                    "opened": False}
+        if status == "ok":
+            opened = True  # opened + report written; a reply may or may not come
         for response in responses:
             result = match_response(response, device_index, feature_index,
                                     function_id)
             if result["kind"] in ("ok", "error"):
+                result["opened"] = True
                 return result
             log.debug("attempt %d: %s report %s", attempt + 1,
                       result["kind"], response)
         time.sleep(0.3)
-    return {"kind": "empty", "params": [], "error_code": None}
+    # "empty" with opened=True means the write went out but no reply came (the
+    # expected outcome for setCurrentHost); opened=False means we never reached
+    # the device (asleep/absent) and nothing was actually sent.
+    return {"kind": "empty", "params": [], "error_code": None, "opened": opened}
 
 
 def discover_device_index(transport: hid_transport, vidpid: str):
@@ -403,6 +416,13 @@ def set_current_host(transport: hid_transport, vidpid: str, device_index: int,
     if result["kind"] == "error":
         log.error("setCurrentHost rejected, HID++ error code %s",
                   result["error_code"])
+        return False
+    if not result.get("opened"):
+        # The HID interface never opened (mouse asleep/absent, or denied): the
+        # command was NOT sent. Must not be mistaken for a success — otherwise a
+        # subsequent "mouse absent from enumeration" reads as a false departure.
+        log.warning("setCurrentHost(%d) not sent: could not open the mouse "
+                    "(asleep/absent or permission denied)", target_host)
         return False
     log.info("setCurrentHost(%d) sent (response kind: %s)", target_host,
              result["kind"])
@@ -509,22 +529,38 @@ def push_mouse(transport: hid_transport, config: dict, target_host: int, *,
             log.info("mouse not listed in enumeration (idle/asleep), "
                      "attempting active probe anyway (attempt %d)", attempt)
 
-        device_index, feature_index = discover_device_index(transport, vidpid)
-        if device_index == "denied":
-            log.error("aborting: cannot send without Input Monitoring "
-                      "permission")
-            return False
-        if device_index is not None:
-            nb_hosts, current_host = get_host_info(transport, vidpid,
-                                                   device_index, feature_index)
-            if current_host == target_host:
-                log.info("mouse already on host channel %d, nothing to do",
-                         target_host)
-                return True
-            if nb_hosts is not None and target_host >= nb_hosts:
-                log.error("target_host %d is out of range: mouse reports only "
-                          "%d paired hosts", target_host, nb_hosts)
+        # Fast path: reuse cached indices to skip the ~8s discover+get_host_info
+        # round-trips. Only when the mouse is PRESENT this poll — the slow path
+        # proves reachability by opening the device before sending; the fast path
+        # skips that, so we only trust a blind send when a confirmed departure
+        # (present -> absent) can actually prove it worked. When absent/unknown we
+        # fall back to full discovery, which opens the device and handles a
+        # reachable-idle vs truly-asleep mouse honestly.
+        cached = getattr(transport, "cached_change_host", None)
+        use_fast = cached is not None and presence is True
+        if use_fast:
+            device_index, feature_index = cached
+        else:
+            device_index, feature_index = discover_device_index(transport, vidpid)
+            if device_index == "denied":
+                log.error("aborting: cannot send without Input Monitoring "
+                          "permission")
                 return False
+        if device_index is not None:
+            if not use_fast:
+                # Slow path: resolve host state (short-circuit / range-check) and
+                # remember the indices for the fast path next time.
+                nb_hosts, current_host = get_host_info(transport, vidpid,
+                                                       device_index, feature_index)
+                if current_host == target_host:
+                    log.info("mouse already on host channel %d, nothing to do",
+                             target_host)
+                    return True
+                if nb_hosts is not None and target_host >= nb_hosts:
+                    log.error("target_host %d is out of range: mouse reports "
+                              "only %d paired hosts", target_host, nb_hosts)
+                    return False
+                transport.cached_change_host = (device_index, feature_index)
             # Do not send after a (minutes-long) sleep during enumeration or
             # discovery: the trigger may be stale and the mouse may already have
             # moved. Expected 30s comfortably clears a slow-but-real discovery.
@@ -550,9 +586,14 @@ def push_mouse(transport: hid_transport, config: dict, target_host: int, *,
                         log.info("mouse pushed to host channel %d (confirmed "
                                  "gone from this Mac)", target_host)
                         return True
-                log.warning("mouse still present after setCurrentHost(%d), "
-                            "retrying (already on that host, or send lost)",
-                            target_host)
+            # This attempt did not confirm a departure (send failed, or the mouse
+            # is still present). If it was the fast path, the cached indices may be
+            # stale/unreachable — drop them so the next attempt rediscovers.
+            if use_fast:
+                transport.cached_change_host = None
+            log.warning("mouse still present after setCurrentHost(%d), "
+                        "retrying (already on that host, or send lost)",
+                        target_host)
 
         now = now_fn()
         if now >= deadline:
