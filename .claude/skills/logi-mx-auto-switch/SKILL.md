@@ -25,7 +25,7 @@ Watcher that pushes a Logitech MX mouse to the Easy-Switch channel the MX Keys k
 | one-shot push | `sudo /path/to/python3 logi_mx_switch.py switch --target N` |
 | daemon status | `sudo launchctl print system/local.logi_mx_switch \| grep -E "state\|pid"` |
 | runtime log | `tail -f logs/logi_mx_switch.log` |
-| tests (no hardware) | `uv run --with pytest pytest tests/` |
+| tests (no hardware) | `uv run pytest` |
 | TCC decision trace | `/usr/bin/log show --last 5m --info --predicate 'process == "tccd"'` (full path: zsh shadows `log`) |
 
 ## Docs map

@@ -41,10 +41,10 @@ sudo python3 logi_mx_switch.py switch --target 1   # one-shot push to host 1
 sudo python3 logi_mx_switch.py watch               # foreground watcher (daemon runs this)
 ```
 
-Unit tests (32, no hardware needed):
+Unit tests (52, no hardware needed: verbatim captured device output plus a fake transport). CI runs them on pushes and pull requests to `main`:
 
 ```bash
-uv run --with pytest pytest tests/
+uv run pytest
 ```
 
 ## Requirements (per machine)
