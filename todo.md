@@ -16,3 +16,17 @@
 ## deferred
 - [ ] third pairing (slot 2) has no watcher; switching to it needs manual mouse switch back
 - [ ] verify daemons after next reboot of each Mac (RunAtLoad set, expected fine)
+
+## done (15/07/2026 and 17/07/2026) - released as 0.1.1 and 0.2.0
+- [x] push_mouse always attempts the active HID++ path, wall-clock budget with backoff, sleep abort
+- [x] cached ChangeHost indices fast path; hidpp_call tracks whether the device opened
+- [x] 52 unit tests passing
+
+## 27/09/2026 - CI and hygiene (docs/27092026_ci_and_license_hygiene_plan.md)
+- [x] GitHub Actions CI (ubuntu, setup-uv, uv run --locked pytest)
+- [x] pytest in a uv dev dependency group; uv.lock refreshed
+- [x] .gitignore: *.bak-*, .pytest_cache/
+- [x] push reliability plan doc tracked as docs/10072026_push_mouse_reliability_plan.md (covers the 17 Jul fast path), registered in docs/index.md
+- [x] c4model: push_mouse, index cache, CI, change log
+- [x] README test count 32 -> 52
+- [ ] third_party/hidapitester: GPL-3.0 text, notice, exact corresponding source (follow-up PR)

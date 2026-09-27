@@ -10,3 +10,6 @@ Naming: DDMMYYYY_topic.md for dated docs, topic.md for evergreen.
 | [troubleshooting.md](troubleshooting.md) | evergreen, ops | two-gate permission model (TCC + kernel root), error decoder, tccd/IOHID debug recipes, uninstall |
 | [setup_new_machine.md](setup_new_machine.md) | evergreen, runbook | add the watcher to another Mac, step by step |
 | [02072026_macos_port_plan.md](02072026_macos_port_plan.md) | dated, plan | original port plan, decisions, live bring-up history |
+| [10072026_push_mouse_reliability_plan.md](10072026_push_mouse_reliability_plan.md) | dated, plan | push_mouse reliability (idle mouse, system sleep) and the 17 Jul fast switch path |
+| [27092026_ci_and_license_hygiene_plan.md](27092026_ci_and_license_hygiene_plan.md) | dated, plan | CI workflow, repo hygiene, vendored hidapitester license material |
+| [../CHANGELOG.md](../CHANGELOG.md) | evergreen, releases | release notes per version |
