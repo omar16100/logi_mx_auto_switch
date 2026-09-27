@@ -29,4 +29,4 @@
 - [x] push reliability plan doc tracked as docs/10072026_push_mouse_reliability_plan.md (covers the 17 Jul fast path), registered in docs/index.md
 - [x] c4model: push_mouse, index cache, CI, change log
 - [x] README test count 32 -> 52
-- [ ] third_party/hidapitester: GPL-3.0 text, notice, exact corresponding source (follow-up PR)
+- [x] third_party/hidapitester: GPL-3.0 text, notice, HIDAPI notices, exact corresponding source (upstream commit 171aaf2 + hidapi-0.15.0), README License section

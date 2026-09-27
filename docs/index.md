@@ -13,3 +13,4 @@ Naming: DDMMYYYY_topic.md for dated docs, topic.md for evergreen.
 | [10072026_push_mouse_reliability_plan.md](10072026_push_mouse_reliability_plan.md) | dated, plan | push_mouse reliability (idle mouse, system sleep) and the 17 Jul fast switch path |
 | [27092026_ci_and_license_hygiene_plan.md](27092026_ci_and_license_hygiene_plan.md) | dated, plan | CI workflow, repo hygiene, vendored hidapitester license material |
 | [../CHANGELOG.md](../CHANGELOG.md) | evergreen, releases | release notes per version |
+| [../third_party/hidapitester/NOTICE.md](../third_party/hidapitester/NOTICE.md) | evergreen, license | vendored hidapitester: GPL-3.0, provenance (upstream commit, CI run), build steps, HIDAPI notices, exact source archives |
