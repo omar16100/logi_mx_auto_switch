@@ -14,8 +14,9 @@ Make "tests pass" verifiable on GitHub, bring the docs in line with the merged 0
   `astral-sh/setup-uv@v10.2.0` (setup-uv publishes no floating major tag after v7),
   `uv run --locked pytest -v`. The suite needs no HID access (captured device output, fake
   transport, injectable clock), so no macOS runner is required.
-- `pyproject.toml`: pytest moved into a `dev` dependency group so `uv run pytest` works;
-  `uv.lock` refreshed (it still recorded version 0.1.0).
+- `pyproject.toml`: pytest moved into a `dev` dependency group so `uv run pytest` works
+  (pytest >= 9.0.3, on Python 3.10+ only); `uv.lock` refreshed (it still recorded version
+  0.1.0).
 - `.gitignore`: `*.bak-*` (local editor backups of `logi_mx_switch.py`) and `.pytest_cache/`.
 - Docs: the 10 Jul push reliability plan (previously an untracked `docs/plans/` file) is
   now [10072026_push_mouse_reliability_plan.md](10072026_push_mouse_reliability_plan.md),
@@ -60,4 +61,5 @@ reported the same versions with the same symbol table and `--help` output.
 ## Status log
 
 - 27/09/2026: part 1 implemented, 52 tests passing locally; merged as PR #1 with CI green.
-- 27/09/2026: part 2 implemented (third_party/hidapitester/).
+- 27/09/2026: part 2 implemented (third_party/hidapitester/), merged as PR #2.
+- 27/09/2026: Dependabot flagged the locked pytest 8.4.2 (GHSA-6w46-j5rx-g56g, fixed in 9.0.3). pytest 9 needs Python 3.10+, while the watcher itself still supports 3.9 (macOS system python3), so the dev dependency is now `pytest>=9.0.3; python_version >= '3.10'` rather than raising `requires-python`.

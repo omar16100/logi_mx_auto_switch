@@ -25,6 +25,7 @@
 ## 27/09/2026 - CI and hygiene (docs/27092026_ci_and_license_hygiene_plan.md)
 - [x] GitHub Actions CI (ubuntu, setup-uv, uv run --locked pytest)
 - [x] pytest in a uv dev dependency group; uv.lock refreshed
+- [x] pytest >= 9.0.3 (GHSA-6w46-j5rx-g56g), dev-only and Python 3.10+; the watcher keeps Python 3.9 support
 - [x] .gitignore: *.bak-*, .pytest_cache/
 - [x] push reliability plan doc tracked as docs/10072026_push_mouse_reliability_plan.md (covers the 17 Jul fast path), registered in docs/index.md
 - [x] c4model: push_mouse, index cache, CI, change log
