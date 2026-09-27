@@ -5,7 +5,7 @@ Person at desk switches MX Keys keyboard between computers with Easy-Switch keys
 
 ## L2 containers
 - watcher (this repo, per Mac): Python 3 stdlib process, root LaunchDaemon local.logi_mx_switch (/Library/LaunchDaemons), interpreter = uv-managed CPython (stable TCC identity). Deployed on two Macs (slot 0 and slot 1), each pushing the mouse to the other.
-- hidapitester (vendored binary, bin/): HID transport CLI, spawned per operation
+- hidapitester (vendored binary, bin/): HID transport CLI, spawned per operation. Third-party, GPL-3.0 (todbot/hidapitester v0.6, HIDAPI 0.15.0); license, provenance, and exact source archives in third_party/hidapitester/
 - macOS IOKit HID stack: enumeration (permission free); device open requires BOTH a TCC Input Monitoring grant (system settings, for the responsible interpreter binary and hidapitester) AND a privileged (root) client: kernel IOHIDFamily gates BLE HID devices with keyboard usages beyond TCC on macOS 26 (verified in unified log)
 - Logitech devices: MX Keys 046D:B35B (presence signal; hosts named via feature 0x1815), MX Master 3 046D:B023 (receives HID++ ChangeHost 0x1814 at feature index 0x0A, device index 0xFF, vendor interface usagePage 0xFF43 usage 0x0202, BLE direct)
 
@@ -28,3 +28,4 @@ keyboard absent N consecutive polls (wall-clock time-jump guard suppresses sleep
 - 15/07/2026: push_mouse reliability (active probe always, wall-clock budget with backoff, sleep abort). See [10072026_push_mouse_reliability_plan.md](10072026_push_mouse_reliability_plan.md).
 - 17/07/2026: fast switch path (cached ChangeHost indices, hidpp_call `opened` tracking).
 - 27/09/2026: CI workflow added; pytest moved to a uv dev dependency group. See [27092026_ci_and_license_hygiene_plan.md](27092026_ci_and_license_hygiene_plan.md).
+- 27/09/2026: third_party/hidapitester/ added (GPL-3.0 text, notice, HIDAPI notices, exact source for the vendored binary).

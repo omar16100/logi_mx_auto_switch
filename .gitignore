@@ -3,3 +3,4 @@ logs/
 __pycache__/
 .pytest_cache/
 *.bak-*
+third_party/hidapitester/build/

@@ -59,7 +59,8 @@ Full install steps: [docs/setup_new_machine.md](docs/setup_new_machine.md)
 
 ```
 logi_mx_switch.py            watcher + CLI (stdlib only, unit-testable pure logic)
-bin/hidapitester             vendored HID transport CLI (todbot/hidapitester v0.6, macOS universal)
+bin/hidapitester             vendored HID transport CLI (todbot/hidapitester v0.6, macOS universal, GPL-3.0)
+third_party/hidapitester/    its license, provenance notice, build steps, and exact source archives
 local.logi_mx_switch.plist  LaunchDaemon template (paths are machine-specific)
 config.json                  per-machine: target_host etc.
 tests/                       pytest suite against verbatim captured device output
@@ -90,3 +91,9 @@ Transport keys (`hidpp_usage_page` 0xFF43, `hidpp_usage` 0x0202, `hidapitester_p
 ## Credits
 
 Technique from [aguessous/Logitech-MX-Auto-Switch](https://github.com/aguessous/Logitech-MX-Auto-Switch) (MIT). HID transport by [todbot/hidapitester](https://github.com/todbot/hidapitester). HID++ 2.0 details cross-checked against [Solaar](https://github.com/pwr-Solaar/Solaar), the Linux kernel `hid-logitech-hidpp` driver, and the [logiops wiki](https://github.com/PixlOne/logiops/wiki/HIDPP--2.0).
+
+## License
+
+MIT, see [LICENSE](LICENSE), for the code written for this repository.
+
+`bin/hidapitester` is a third-party program ([todbot/hidapitester](https://github.com/todbot/hidapitester) v0.6, compiled with [HIDAPI](https://github.com/libusb/hidapi) 0.15.0). The watcher invokes it as a separate program, and it is distributed under its own GPL-3.0 license. Its license text, provenance, build instructions, HIDAPI's license notices, and the exact corresponding source are in [third_party/hidapitester/](third_party/hidapitester/NOTICE.md).
